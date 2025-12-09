@@ -58,7 +58,7 @@ def get_certificate_normal_time(cert_time_data):
     date = datetime.fromtimestamp(timestamp)
     return f"{date.day}.{date.month}.{date.year}"
 
-def parseSSLINfo(cert, link):
+def parseSSLInfo(cert, link):
     subject = dict(x[0] for x in cert['subject'])
     domain = subject['commonName']
 
@@ -73,7 +73,7 @@ def get_certificate_data(domain_name):
     cert = check_ssl_info(domain_name)
 
     if cert is not None:
-        return parseSSLINfo(cert, domain_name)
+        return parseSSLInfo(cert, domain_name)
     else:
         return None
 

@@ -7,3 +7,6 @@ END_DATE = 'Контроль(срок действия текущего серт
 
 SSL_ERROR_TEMPLATE = 'Ошибка проверки, вероятно внутренний домен'
 
+WARNING_TIME_CONST = 30
+SUCCESS_TIME_CONST = 60
+
