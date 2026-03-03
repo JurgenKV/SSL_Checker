@@ -68,7 +68,6 @@ def parseSSLInfo(cert, link):
     certificate = Certificate(link,domain,create_time,end_time)
     return certificate
 
-
 def get_certificate_data(domain_name):
     cert = check_ssl_info(domain_name)
 

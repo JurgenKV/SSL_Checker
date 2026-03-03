@@ -1,6 +1,9 @@
 import csv
+
+from openpyxl.worksheet.worksheet import Worksheet
+
 import CONST_COLUMN as CONST
-import datetime as dt
+
 
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font
@@ -9,7 +12,29 @@ from typing import List, Dict
 
 from SSLRequest import get_certificate_data
 from UI import change_progress_ui
-from CONST_COLUMN import WARNING_TIME_CONST, SUCCESS_TIME_CONST
+from TimeUtils import get_ssl_datetime_state
+
+from UI import get_include_Success, get_include_warning, get_include_Error
+# const style color
+EXPIRE_FILL = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")  # Красный фон (ошибка)
+SUCCESS_FILL = PatternFill(start_color="ABF5D1", end_color="ABF5D1", fill_type="solid")  # Зелёный фон (успех)
+WARNING_FILL = PatternFill(start_color="FFF0B3", end_color="FFF0B3", fill_type="solid")
+ERROR_FILL = PatternFill(start_color="FFBDAD", end_color="FFBDAD", fill_type="solid")
+BLACK_FILL = PatternFill(start_color="000000", end_color="000000", fill_type="solid")
+
+BOLD_FILL = Font(bold=True)
+
+class SectionsState:
+    Expire_section = False
+    Warning_section = False
+    Error_section = False
+    Success_section = False
+
+    def __init__(self, expire, warning, error, success):
+        self.Expire_section = expire
+        self.Warning_section = warning
+        self.Error_section = error
+        self.Success_section = success
 
 def load_csv(file):
     original_path = Path(file)
@@ -45,31 +70,7 @@ def get_new_csv_data_with_ssl(list_of_dicts):
 
     return list_of_dicts
 
-# def save_csv(list_of_dicts, file_path):
-#     # Берём заголовки из ключей первого словаря
-#     fieldnames = list_of_dicts[0].keys()
-#
-#     with open(file_path, mode='w', encoding='utf-8-sig', newline='') as f:
-#         writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=';')
-#         writer.writeheader()
-#         writer.writerows(list_of_dicts)
-
-# def csv_to_excel_manual(csv_file: str, excel_file: str = None):
-#     if excel_file is None:
-#         excel_file = Path(csv_file).with_suffix('.xlsx')
-#
-#     wb = Workbook()
-#     ws = wb.active
-#
-#     with open(csv_file, 'r', encoding='utf-8-sig', newline='') as f:
-#         reader = csv.reader(f, delimiter=';')
-#         for row in reader:
-#             ws.append(row)
-#
-#     wb.save(excel_file)
-#     return excel_file
-
-def save_colored_excel(list_of_dicts: List[Dict], output_path: Path):
+def save_completed_excel(list_of_dicts: List[Dict], output_path: Path):
     if not list_of_dicts:
         raise ValueError("Нет данных для сохранения")
 
@@ -77,6 +78,18 @@ def save_colored_excel(list_of_dicts: List[Dict], output_path: Path):
 
     # Создаём новую книгу Excel
     wb = Workbook()
+    # Создаем первую страницу со статусами SSL
+    create_ssl_page_output(wb, list_of_dicts)
+    # Создаем вторую страницу с распределением по владельцам доменов
+    create_owner_ssl_page_output(wb, list_of_dicts)
+    # Создаем третью страницу с распределением по админам доменов
+    create_admin_ssl_page_output(wb, list_of_dicts)
+    # Сохраняем
+    wb.save(output_file_path)
+    print(f"Результат сохранён в: {output_file_path}")
+    return output_file_path
+
+def create_ssl_page_output(wb: Workbook, list_of_dicts: List[Dict]):
     ws = wb.active
     ws.title = "Результаты SSL"
 
@@ -84,15 +97,9 @@ def save_colored_excel(list_of_dicts: List[Dict], output_path: Path):
     headers = list(list_of_dicts[0].keys())
     ws.append(headers)
 
-    # Стили
-    error_fill = PatternFill(start_color="FFBDAD", end_color="FFBDAD", fill_type="solid")  # Красный фон (ошибка)
-    success_fill = PatternFill(start_color="ABF5D1", end_color="ABF5D1", fill_type="solid")  # Зелёный фон (успех)
-    warning_fill = PatternFill(start_color="FFF0B3", end_color="FFF0B3", fill_type="solid")
-    bold_font = Font(bold=True)
-
     # Форматируем заголовки
     for col in range(1, len(headers) + 1):
-        ws.cell(row=1, column=col).font = bold_font
+        ws.cell(row=1, column=col).font = BOLD_FILL
 
     # Заполняем строки и применяем цвета
     for row_idx, row_data in enumerate(list_of_dicts, start=2):
@@ -106,23 +113,149 @@ def save_colored_excel(list_of_dicts: List[Dict], output_path: Path):
                 # for c in range(1, len(headers) + 1):
                 #     ws.cell(row=row_idx, column=c).fill = error_fill
                 # break
-                cell.fill = error_fill
+                cell.fill = ERROR_FILL
             elif header == CONST.END_DATE and value:
                 # Можно раскрасить только ячейку с датой, например, зелёным
-                code = checkValidDateTime(value)
+                code = get_ssl_datetime_state(value)
                 if code == 0:
-                    cell.fill = success_fill
+                    cell.fill = SUCCESS_FILL
                     for c in range(1, len(headers) + 1):
-                        ws.cell(row=row_idx, column=c).fill = success_fill
+                        ws.cell(row=row_idx, column=c).fill = SUCCESS_FILL
                 elif code == 1:
-                    cell.fill = success_fill
+                    cell.fill = SUCCESS_FILL
                 elif code == 2:
-                    cell.fill = warning_fill
+                    cell.fill = WARNING_FILL
                 else:
                     for c in range(1, len(headers) + 1):
-                        ws.cell(row=row_idx, column=c).fill = error_fill
+                        ws.cell(row=row_idx, column=c).fill = EXPIRE_FILL
 
-    # Автоподбор ширины колонок (опционально)
+
+def create_owner_ssl_page_output(wb: Workbook, list_of_dicts: List[Dict]):
+    """
+    Создает лист с отчетом, сгруппированным по владельцам.
+    """
+    ws_owners = wb.create_sheet(title="По Владельцам")
+    current_row = 1  # Текущая строка для записи данных
+
+    # Получаем список уникальных владельцев
+    owners = get_owners_list(list_of_dicts)
+
+    # Формируем отчет для каждого владельца
+    for owner in owners:
+        section_state = SectionsState(
+            is_contain_section_values(list_of_dicts, owner, 2, True),
+            is_contain_section_values(list_of_dicts, owner, 1, True),
+            is_contain_section_values(list_of_dicts, owner, 3, True),
+            is_contain_section_values(list_of_dicts, owner, 0, True)
+        )
+        # Заголовок администратора
+        if (section_state.Expire_section == 0 and
+                (section_state.Warning_section & get_include_warning()) == 0 and
+                (section_state.Error_section & get_include_Error()) == 0 and
+                (section_state.Success_section & get_include_Success()) == 0):
+            continue
+
+        #if section_state.Expire_section == 0 and section_state.Warning_section == 0 and section_state.Error_section == 0:
+        #    continue
+
+        ws_owners.cell(row=current_row, column=1, value=owner).font = BOLD_FILL
+        current_row += 1
+        # Добавляем домены в зоне ERROR (code == 2)
+        if section_state.Expire_section:
+            for c in range(1, 5):
+                ws_owners.cell(row=current_row, column=c, value="EXPIRE").fill = EXPIRE_FILL
+            current_row += 1
+            current_row = get_section_by_state(list_of_dicts, ws_owners, owner, 2, current_row, True)
+        # Добавляем домены в зоне WARNING (code == 1)
+        if section_state.Warning_section and get_include_warning():
+            for c in range(1, 5):
+                ws_owners.cell(row=current_row, column=c, value="WARNING").fill = WARNING_FILL
+            current_row += 1
+            current_row = get_section_by_state(list_of_dicts, ws_owners, owner, 1, current_row,True)
+        if section_state.Error_section and get_include_Error():
+            for c in range(1, 5):
+                ws_owners.cell(row=current_row, column=c, value="ERRORS").fill = ERROR_FILL
+            current_row += 1
+            current_row = get_section_by_state(list_of_dicts, ws_owners, owner, 3, current_row,True)
+        if section_state.Success_section and get_include_Success():
+            for c in range(1, 5):
+                ws_owners.cell(row=current_row, column=c, value="SUCCESS").fill = SUCCESS_FILL
+            current_row += 1
+            current_row = get_section_by_state(list_of_dicts, ws_owners, owner, 0, current_row,True)
+
+        # Разделитель между администраторами
+        current_row += 1
+        for c in range(1, 5):
+            ws_owners.cell(row=current_row, column=c).fill = BLACK_FILL
+        current_row += 1
+        # break
+
+    # Автоподбор ширины колонок
+    column_size_auto(ws_owners)
+
+
+def create_admin_ssl_page_output(wb: Workbook, list_of_dicts: List[Dict]):
+    """
+    Создает лист с отчетом, сгруппированным по администраторам.
+    """
+    ws_admins = wb.create_sheet(title="По Админам")
+    current_row = 1  # Текущая строка для записи данных
+    # Получаем список уникальных администраторов
+    admins = get_admins_list(list_of_dicts)
+
+    # Формируем отчет для каждого администратора
+    for admin in admins:
+        section_state = SectionsState(
+            is_contain_section_values(list_of_dicts, admin, 2, False),
+            is_contain_section_values(list_of_dicts, admin, 1, False),
+            is_contain_section_values(list_of_dicts, admin, 3, False),
+            is_contain_section_values(list_of_dicts, admin, 0, False)
+        )
+        # Заголовок администратора
+        if (section_state.Expire_section == 0 and
+                (section_state.Warning_section & get_include_warning()) == 0 and
+                (section_state.Error_section & get_include_Error()) == 0 and
+                (section_state.Success_section & get_include_Success()) == 0):
+            continue
+
+        #if section_state.Expire_section == 0 and section_state.Warning_section == 0 and section_state.Error_section == 0:
+        #    continue
+
+        ws_admins.cell(row=current_row, column=1, value=admin).font = BOLD_FILL
+        current_row += 1
+        # Добавляем домены в зоне ERROR (code == 2)
+        if section_state.Expire_section:
+            for c in range(1, 5):
+                ws_admins.cell(row=current_row, column=c, value="EXPIRE").fill = EXPIRE_FILL
+            current_row += 1
+            current_row = get_section_by_state(list_of_dicts, ws_admins, admin,2, current_row, False)
+        # Добавляем домены в зоне WARNING (code == 1)
+        if section_state.Warning_section and get_include_warning():
+            for c in range(1, 5):
+                ws_admins.cell(row=current_row, column=c, value="WARNING").fill = WARNING_FILL
+            current_row += 1
+            current_row = get_section_by_state(list_of_dicts, ws_admins, admin, 1, current_row, False)
+        if section_state.Error_section and get_include_Error():
+            for c in range(1, 5):
+                ws_admins.cell(row=current_row, column=c, value="ERRORS").fill = ERROR_FILL
+            current_row += 1
+            current_row = get_section_by_state(list_of_dicts, ws_admins, admin, 3, current_row, False)
+        if section_state.Success_section and get_include_Success():
+            for c in range(1, 5):
+                ws_admins.cell(row=current_row, column=c, value="SUCCESS").fill = SUCCESS_FILL
+            current_row += 1
+            current_row = get_section_by_state(list_of_dicts, ws_admins, admin, 0, current_row,True)
+
+        # Разделитель между администраторами
+        current_row += 1
+        for c in range(1, 5):
+            ws_admins.cell(row=current_row, column=c).fill = BLACK_FILL
+        current_row += 1
+
+    # Автоподбор ширины колонок
+    column_size_auto(ws_admins)
+
+def column_size_auto(ws: Worksheet):
     for col in ws.columns:
         max_length = 0
         column = col[0].column_letter
@@ -135,22 +268,59 @@ def save_colored_excel(list_of_dicts: List[Dict], output_path: Path):
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column].width = adjusted_width
 
-    # Сохраняем
-    wb.save(output_file_path)
-    print(f"Результат сохранён в: {output_file_path}")
-    return output_file_path
+def get_owners_list(list_of_dicts: List[Dict]):
+    owners_list = []
+    for dictionary in list_of_dicts:
+        owners_list.append(dictionary.get(CONST.OWNER))
+    owners_list = sorted(set(owners_list))
+    return owners_list
 
-    # 0 - success > suc_const, 1 - success < suc_const, 2 - warning, 3 - expired
-def checkValidDateTime(date_str):
-    ssl_date = dt.datetime.strptime(date_str, "%d.%m.%Y")
-    today = dt.datetime.today()
-    delta = ssl_date - today
-    print(delta)
-    if delta.days > SUCCESS_TIME_CONST:
-        return 0
-    elif SUCCESS_TIME_CONST >= delta.days > WARNING_TIME_CONST:
-        return 1
-    elif 0 <= delta.days <= WARNING_TIME_CONST:
-        return 2
+def get_admins_list(list_of_dicts: List[Dict]):
+    admins_list = []
+    for dictionary in list_of_dicts:
+        admins_list.append(dictionary.get(CONST.ADMIN))
+    owners_list = sorted(set(admins_list))
+    return owners_list
+
+def get_section_by_state(list_of_dicts: List[Dict], ws: Worksheet, name, code_num ,current_row, is_owner):
+    if is_owner:
+        for dictionary in list_of_dicts:
+            if dictionary[CONST.OWNER] == name:
+                end_date = dictionary[CONST.END_DATE]
+                code = get_ssl_datetime_state(end_date)
+                if code == code_num:
+                    ws.cell(row=current_row, column=1, value=dictionary[CONST.NAME])
+                    ws.cell(row=current_row, column=2, value=dictionary[CONST.DOMAIN_NAME])
+                    ws.cell(row=current_row, column=3, value=dictionary[CONST.INFO])
+                    ws.cell(row=current_row, column=4, value=dictionary[CONST.END_DATE])
+                    current_row += 1
     else:
-        return 3
+        for dictionary in list_of_dicts:
+            if dictionary[CONST.ADMIN] == name:
+                end_date = dictionary[CONST.END_DATE]
+                code = get_ssl_datetime_state(end_date)
+                if code == code_num:
+                    ws.cell(row=current_row, column=1, value=dictionary[CONST.NAME])
+                    ws.cell(row=current_row, column=2, value=dictionary[CONST.DOMAIN_NAME])
+                    ws.cell(row=current_row, column=3, value=dictionary[CONST.INFO])
+                    ws.cell(row=current_row, column=4, value=dictionary[CONST.END_DATE])
+                    current_row += 1
+    return current_row
+
+def is_contain_section_values(list_of_dicts: List[Dict], name, code_num, is_owner):
+    if is_owner:
+        for dictionary in list_of_dicts:
+            if dictionary[CONST.OWNER] == name:
+                end_date = dictionary[CONST.END_DATE]
+                code = get_ssl_datetime_state(end_date)
+                if code == code_num:
+                    return True
+    else:
+        for dictionary in list_of_dicts:
+            if dictionary[CONST.ADMIN] == name:
+                end_date = dictionary[CONST.END_DATE]
+                code = get_ssl_datetime_state(end_date)
+                if code == code_num:
+                    return True
+    return False
+
